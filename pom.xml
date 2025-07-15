@@ -28,5 +28,6 @@
             <artifactId>poi</artifactId>
             <version>5.2.5</version>
         </dependency>
+    </dependencies>
 
 </project>
