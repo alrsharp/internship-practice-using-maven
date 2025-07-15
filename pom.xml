@@ -22,7 +22,7 @@
             <version>5.2.5</version>
         </dependency>
 
-        <!-- this is for older excel files (.xls), so pretty much files before 2007. we probably won't be using these -->
+        <!-- this is for older excel files (.xls), so pretty much files before 2007. we probably won't be using these  -->
         <dependency>
             <groupId>org.apache.poi</groupId>
             <artifactId>poi</artifactId>
