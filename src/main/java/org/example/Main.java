@@ -47,6 +47,52 @@ public class Main {
             System.out.println("Sheet name: " + sheet.getSheetName());
             System.out.println("Number of rows: " + (sheet.getLastRowNum() + 1));
 
+            //READS COLUMN HEADERS
+            Row headerRow = sheet.getRow(0);
+            System.out.println("\n=== COLUMN HEADERS ===");
+
+            for (int i = 0; i < headerRow.getLastCellNum(); i++) {
+                Cell cell = headerRow.getCell(i);
+                String header = cell.getStringCellValue();
+                System.out.println((i + 1) + ". " + header);
+            }
+
+
+
+            System.out.println("\n=== SAMPLE DATA FROM EACH COLUMN ===");
+
+            // LOOKING AT THE FIRST 3 ROWS OF DATA
+            for (int i = 0; i < headerRow.getLastCellNum(); i++) {
+                String header = headerRow.getCell(i) != null ? headerRow.getCell(i).getStringCellValue() : "Empty";
+                System.out.println("\nColumn " + (i + 1) + ": " + header);
+                System.out.print("  Sample values: ");
+
+                // reads 3 sample values from each column
+                for (int rowNum = 1; rowNum <= 3; rowNum++) {
+                    Row dataRow = sheet.getRow(rowNum);
+                    if (dataRow != null) {
+                        Cell cell = dataRow.getCell(i);
+                        if (cell != null) {
+                            // we need to handle different cell types
+                            String value = "";
+                            if (cell.getCellType() == CellType.STRING) {
+                                value = cell.getStringCellValue();
+                            } else if (cell.getCellType() == CellType.NUMERIC) {
+                                value = String.valueOf(cell.getNumericCellValue());
+                            } else {
+                                value = "Empty";
+                            }
+                            System.out.print(value);
+                        } else {
+                            System.out.print("Empty");
+                        }
+                        if (rowNum < 3) System.out.print(", ");
+                    }
+                }
+                System.out.println();
+            }
+            //BTW for the sale dates, the number is how excel stores the data im p sure i think thats why it's off
+
             //closes workbook
             workbook.close();
             fis.close();
