@@ -14,7 +14,7 @@ public class Main {
             workbook.close();
         } catch (Exception e) {
             System.out.println("error: " + e.getMessage());
-            //tells if apache poi isn't working correctly
+            //tells if apache poi isn't working
         }
     }
 }
