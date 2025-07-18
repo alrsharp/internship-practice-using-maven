@@ -37,6 +37,7 @@ public class Main {
         try {
             FileInputStream fis = new FileInputStream(filePath);
             XSSFWorkbook workbook = new XSSFWorkbook(fis);
+            FormulaEvaluator evaluator = workbook.getCreationHelper().createFormulaEvaluator();
 
             //number of sheets
             System.out.println("\n=== EXCEL FILE INFO ===");
@@ -79,12 +80,14 @@ public class Main {
                                 value = cell.getStringCellValue();
                             } else if (cell.getCellType() == CellType.NUMERIC) {
                                 value = String.valueOf(cell.getNumericCellValue());
-                            } else {
-                                value = "Empty";
-                            }
-                            System.out.print(value);
+                            } else if(cell.getCellType()==CellType.FORMULA){
+                                CellValue evaluatedValue = evaluator.evaluate(cell);
+                                if(evaluatedValue.getCellType()==CellType.NUMERIC){
+                                    value = String.valueOf(evaluatedValue.getNumberValue());
+                            } else if(evaluatedValue.getCellType()==CellType.STRING){
+                                    value = evaluatedValue.getStringValue();
                         } else {
-                            System.out.print("Empty");
+                            value = "Empty";
                         }
                         if (rowNum < 3) System.out.print(", ");
                     }
