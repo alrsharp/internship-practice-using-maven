@@ -8,7 +8,7 @@ import java.io.IOException;
 
 public class Main {
     public static void main(String[] args) {
-        System.out.println("Hello, World!");
+        // System.out.println("Hello, World!");
 
         // this tests if apache poi is working correctly
         try {
