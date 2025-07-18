@@ -5,6 +5,7 @@ import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.text.DecimalFormat;
 
 public class Main {
     public static void main(String[] args) {
@@ -19,7 +20,6 @@ public class Main {
         } catch (Exception e) {
             System.out.println("error: " + e.getMessage());
             //tells if apache poi isn't working
-
         }
 
         String filePath = "David-Infinity-Purchase-History - Copy.xlsx";
@@ -37,7 +37,6 @@ public class Main {
         try {
             FileInputStream fis = new FileInputStream(filePath);
             XSSFWorkbook workbook = new XSSFWorkbook(fis);
-            FormulaEvaluator evaluator = workbook.getCreationHelper().createFormulaEvaluator();
 
             //number of sheets
             System.out.println("\n=== EXCEL FILE INFO ===");
@@ -58,43 +57,41 @@ public class Main {
                 System.out.println((i + 1) + ". " + header);
             }
 
+            System.out.println("\n=== ALL DATA ===");
 
+            //  formatter for better number display
+            DecimalFormat df = new DecimalFormat("#.##");
 
-            System.out.println("\n=== SAMPLE DATA FROM EACH COLUMN ===");
+            // fixed it to tprocess all the rows
+            int totalRows = sheet.getLastRowNum() + 1;
+            System.out.println("Processing " + totalRows + " rows total...\n");
 
-            // LOOKING AT THE FIRST 3 ROWS OF DATA
+            // print headers first
+            System.out.print("Row#\t");
             for (int i = 0; i < headerRow.getLastCellNum(); i++) {
                 String header = headerRow.getCell(i) != null ? headerRow.getCell(i).getStringCellValue() : "Empty";
-                System.out.println("\nColumn " + (i + 1) + ": " + header);
-                System.out.print("  Sample values: ");
-
-                // reads 3 sample values from each column
-                for (int rowNum = 1; rowNum <= 3; rowNum++) {
-                    Row dataRow = sheet.getRow(rowNum);
-                    if (dataRow != null) {
-                        Cell cell = dataRow.getCell(i);
-                        if (cell != null) {
-                            // we need to handle different cell types
-                            String value = "";
-                            if (cell.getCellType() == CellType.STRING) {
-                                value = cell.getStringCellValue();
-                            } else if (cell.getCellType() == CellType.NUMERIC) {
-                                value = String.valueOf(cell.getNumericCellValue());
-                            } else if(cell.getCellType()==CellType.FORMULA){
-                                CellValue evaluatedValue = evaluator.evaluate(cell);
-                                if(evaluatedValue.getCellType()==CellType.NUMERIC){
-                                    value = String.valueOf(evaluatedValue.getNumberValue());
-                            } else if(evaluatedValue.getCellType()==CellType.STRING){
-                                    value = evaluatedValue.getStringValue();
-                        } else {
-                            value = "Empty";
-                        }
-                        if (rowNum < 3) System.out.print(", ");
-                    }
-                }
-                System.out.println();
+                System.out.print(header + "\t");
             }
-            //BTW for the sale dates, the number is how excel stores the data im p sure i think thats why it's off
+            System.out.println();
+
+            // print separator
+            System.out.println("------------------------------------------------------------");
+
+            //  each data row (starting from row 1, skipping header, idk if all files are like this)
+            for (int rowNum = 1; rowNum <= sheet.getLastRowNum(); rowNum++) {
+                Row dataRow = sheet.getRow(rowNum);
+                if (dataRow != null) {
+                    System.out.print(rowNum + "\t");
+
+                    //  each column in this row
+                    for (int colNum = 0; colNum < headerRow.getLastCellNum(); colNum++) {
+                        Cell cell = dataRow.getCell(colNum);
+                        String value = getCellValueAsString(cell, df);
+                        System.out.print(value + "\t");
+                    }
+                    System.out.println();
+                }
+            }
 
             //closes workbook
             workbook.close();
@@ -103,6 +100,60 @@ public class Main {
         } catch (IOException e) {
             System.out.println("Error reading Excel file: " + e.getMessage());
         }
+    }
 
+    // helper method extracts cell values
+    private static String getCellValueAsString(Cell cell, DecimalFormat df) {
+        if (cell == null) {
+            return "Empty";
+        }
+
+        switch (cell.getCellType()) {
+            case STRING:
+                return cell.getStringCellValue();
+            case NUMERIC:
+                if (DateUtil.isCellDateFormatted(cell)) {
+                    // puts the date cells properly
+                    return cell.getDateCellValue().toString();
+                } else {
+                    // numeric cells with proper formatting
+                    double numericValue = cell.getNumericCellValue();
+                    // checks if it's a whole number
+                    if (numericValue == Math.floor(numericValue)) {
+                        return String.valueOf((long) numericValue);
+                    } else {
+                        return df.format(numericValue);
+                    }
+                }
+            case BOOLEAN:
+                return String.valueOf(cell.getBooleanCellValue());
+            case FORMULA:
+                // eval the formula
+                try {
+                    FormulaEvaluator evaluator = cell.getSheet().getWorkbook().getCreationHelper().createFormulaEvaluator();
+                    CellValue cellValue = evaluator.evaluate(cell);
+                    switch (cellValue.getCellType()) {
+                        case STRING:
+                            return cellValue.getStringValue();
+                        case NUMERIC:
+                            double numVal = cellValue.getNumberValue();
+                            if (numVal == Math.floor(numVal)) {
+                                return String.valueOf((long) numVal);
+                            } else {
+                                return df.format(numVal);
+                            }
+                        case BOOLEAN:
+                            return String.valueOf(cellValue.getBooleanValue());
+                        default:
+                            return "Formula Result: " + cellValue.formatAsString();
+                    }
+                } catch (Exception e) {
+                    return "Formula Error: " + cell.getCellFormula();
+                }
+            case BLANK:
+                return "Empty";
+            default:
+                return "Unknown Type";
+        }
     }
 }
