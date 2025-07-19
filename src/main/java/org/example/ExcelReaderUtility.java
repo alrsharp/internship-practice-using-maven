@@ -41,8 +41,18 @@ public class ExcelReaderUtility {
             // Map column names to indices for flexible reading
             Map<String, Integer> columnMap = createColumnMap(headerRow);
 
-            // Read data rows
-            for (int rowNum = 1; rowNum <= sheet.getLastRowNum(); rowNum++) {
+            // Debug: Print the column map
+            System.out.println("Column mapping:");
+            for (Map.Entry<String, Integer> entry : columnMap.entrySet()) {
+                System.out.println("  '" + entry.getKey() + "' -> column " + entry.getValue());
+            }
+
+            // Detect where the actual data ends (before summary rows)
+            int lastDataRow = findLastDataRow(sheet);
+            System.out.println("Data rows: 1 to " + lastDataRow + " (total sheet rows: " + sheet.getLastRowNum() + ")");
+
+            // Read data rows (excluding summary rows)
+            for (int rowNum = 1; rowNum <= lastDataRow; rowNum++) {
                 Row dataRow = sheet.getRow(rowNum);
                 if (dataRow != null && !isRowEmpty(dataRow)) {
                     try {
@@ -60,6 +70,86 @@ public class ExcelReaderUtility {
     }
 
     /**
+     * Finds the last row that contains actual data (not summary rows).
+     * Uses a simple but effective approach: exclude last 2 rows if they look like summaries.
+     */
+    private static int findLastDataRow(Sheet sheet) {
+        int totalRows = sheet.getLastRowNum();
+
+        System.out.println("Total rows in sheet: " + (totalRows + 1) + " (0-indexed: " + totalRows + ")");
+
+        // Simple approach: check if the last 2 rows look like summary rows
+        // If so, exclude them. If not, include all rows.
+        boolean lastRowsAreSummary = checkLastTwoRowsForSummary(sheet);
+
+        if (lastRowsAreSummary) {
+            int lastDataRow = totalRows - 2;
+            System.out.println("Last 2 rows detected as summary rows. Data ends at row " + (lastDataRow + 1));
+            return lastDataRow;
+        } else {
+            System.out.println("No summary rows detected. Processing all rows.");
+            return totalRows;
+        }
+    }
+
+    /**
+     * Specifically checks if the last two rows contain summary data.
+     */
+    private static boolean checkLastTwoRowsForSummary(Sheet sheet) {
+        int totalRows = sheet.getLastRowNum();
+
+        System.out.println("Checking rows " + (totalRows - 1) + " and " + totalRows + " for summary patterns");
+
+        // Check both of the last two rows (0-indexed: totalRows-1 and totalRows)
+        for (int rowNum = totalRows - 1; rowNum <= totalRows; rowNum++) {
+            Row row = sheet.getRow(rowNum);
+            if (row != null) {
+                System.out.println("Checking row " + (rowNum + 1) + " for summary pattern:");
+
+                int emptyCells = 0;
+                int totalCells = 0;
+                int numericCells = 0;
+                boolean hasLargeNumbers = false;
+
+                // Check up to 10 cells or the actual number of cells in the row
+                int cellsToCheck = Math.min(10, row.getLastCellNum());
+
+                for (int cellNum = 0; cellNum < cellsToCheck; cellNum++) {
+                    Cell cell = row.getCell(cellNum);
+                    totalCells++;
+
+                    if (cell == null || cell.getCellType() == CellType.BLANK) {
+                        emptyCells++;
+                    } else if (cell.getCellType() == CellType.NUMERIC) {
+                        numericCells++;
+                        double value = cell.getNumericCellValue();
+                        System.out.println("  Cell " + cellNum + ": " + value);
+
+                        // Look for numbers that could be totals (avoid dates which are 40000+)
+                        if (value >= 1000 && value <= 100000) {
+                            hasLargeNumbers = true;
+                        }
+                    } else if (cell.getCellType() == CellType.STRING) {
+                        System.out.println("  Cell " + cellNum + ": '" + cell.getStringCellValue().trim() + "'");
+                    }
+                }
+
+                System.out.println("  Empty: " + emptyCells + "/" + totalCells + ", Numeric: " + numericCells + ", Has large numbers: " + hasLargeNumbers);
+
+                // If this row is mostly empty (60%+) and has large numbers, it's likely a summary
+                double emptyPercentage = totalCells > 0 ? (double) emptyCells / totalCells : 0;
+                if (emptyPercentage >= 0.6 && hasLargeNumbers) {
+                    System.out.println("  -> Row " + (rowNum + 1) + " looks like a summary row");
+                    return true;
+                }
+            }
+        }
+
+        System.out.println("No summary rows detected in last 2 rows");
+        return false;
+    }
+
+    /**
      * Creates a map of column names to their indices for flexible column reading.
      */
     private static Map<String, Integer> createColumnMap(Row headerRow) {
@@ -67,9 +157,10 @@ public class ExcelReaderUtility {
 
         for (int i = 0; i < headerRow.getLastCellNum(); i++) {
             Cell cell = headerRow.getCell(i);
-            if (cell != null) {
+            if (cell != null && cell.getCellType() == CellType.STRING) {
                 String columnName = cell.getStringCellValue().trim().toLowerCase();
                 columnMap.put(columnName, i);
+                System.out.println("Found column: '" + columnName + "' at index " + i);
             }
         }
 
@@ -78,18 +169,19 @@ public class ExcelReaderUtility {
 
     /**
      * Creates a PurchaseRecord from a data row using the column map.
+     * Updated to match the actual Excel column names.
      */
     private static PurchaseRecord createPurchaseRecord(Row dataRow, Map<String, Integer> columnMap) {
         PurchaseRecord record = new PurchaseRecord();
 
-        // Extract data based on common column names (flexible approach)
-        record.setItemName(getStringValue(dataRow, columnMap, "item", "itemname", "product", "name"));
-        record.setPrice(getBigDecimalValue(dataRow, columnMap, "price", "cost", "unitprice"));
-        record.setQuantity(getIntValue(dataRow, columnMap, "quantity", "qty", "amount"));
-        record.setPurchaseDate(getDateValue(dataRow, columnMap, "date", "purchasedate", "orderdate"));
+        // Extract data based on actual Excel column names
+        record.setItemName(getStringValue(dataRow, columnMap, "procuct name", "product name", "item", "itemname", "name"));
+        record.setPrice(getBigDecimalValue(dataRow, columnMap, "unit price", "price", "cost", "unitprice"));
+        record.setQuantity(getIntValue(dataRow, columnMap, "qty sold", "quantity sold", "quantity", "qty", "amount"));
+        record.setPurchaseDate(getDateValue(dataRow, columnMap, "sale date", "date", "purchasedate", "orderdate"));
         record.setCategory(getStringValue(dataRow, columnMap, "category", "type", "group"));
-        record.setVendor(getStringValue(dataRow, columnMap, "vendor", "supplier", "store"));
-        record.setTotalCost(getBigDecimalValue(dataRow, columnMap, "total", "totalcost", "totalprice"));
+        record.setVendor(getStringValue(dataRow, columnMap, "customer name", "vendor", "supplier", "store", "customer"));
+        record.setTotalCost(getBigDecimalValue(dataRow, columnMap, "total amount", "total", "totalcost", "totalprice"));
 
         return record;
     }
@@ -103,7 +195,10 @@ public class ExcelReaderUtility {
             if (columnIndex != null) {
                 Cell cell = row.getCell(columnIndex);
                 if (cell != null) {
-                    return getCellValueAsString(cell);
+                    String value = getCellValueAsString(cell);
+                    if (!value.isEmpty()) {
+                        return value;
+                    }
                 }
             }
         }
@@ -150,10 +245,16 @@ public class ExcelReaderUtility {
             Integer columnIndex = columnMap.get(name);
             if (columnIndex != null) {
                 Cell cell = row.getCell(columnIndex);
-                if (cell != null && DateUtil.isCellDateFormatted(cell)) {
-                    return cell.getDateCellValue().toInstant()
-                            .atZone(ZoneId.systemDefault())
-                            .toLocalDate();
+                if (cell != null) {
+                    if (DateUtil.isCellDateFormatted(cell)) {
+                        return cell.getDateCellValue().toInstant()
+                                .atZone(ZoneId.systemDefault())
+                                .toLocalDate();
+                    } else if (cell.getCellType() == CellType.NUMERIC) {
+                        // Handle Excel date as numeric value
+                        Date date = DateUtil.getJavaDate(cell.getNumericCellValue());
+                        return date.toInstant().atZone(ZoneId.systemDefault()).toLocalDate();
+                    }
                 }
             }
         }
@@ -176,12 +277,15 @@ public class ExcelReaderUtility {
                 throw new IOException("No header row found");
             }
 
+            // Find last data row (exclude summary rows)
+            int lastDataRow = findLastDataRow(sheet);
+
             // Analyze each column
             for (int colNum = 0; colNum < headerRow.getLastCellNum(); colNum++) {
                 Cell headerCell = headerRow.getCell(colNum);
                 if (headerCell != null) {
                     String columnName = headerCell.getStringCellValue();
-                    ColumnInfo columnInfo = analyzeColumn(sheet, colNum, columnName);
+                    ColumnInfo columnInfo = analyzeColumn(sheet, colNum, columnName, lastDataRow);
                     analysis.addColumn(columnInfo);
                 }
             }
@@ -192,16 +296,20 @@ public class ExcelReaderUtility {
 
     /**
      * Analyzes a specific column to determine its data type and calculate statistics.
+     * Only analyzes actual data rows, excluding summary rows.
      */
-    private static ColumnInfo analyzeColumn(Sheet sheet, int columnIndex, String columnName) {
+    private static ColumnInfo analyzeColumn(Sheet sheet, int columnIndex, String columnName, int lastDataRow) {
         ColumnInfo info = new ColumnInfo(columnName);
         List<Double> numericValues = new ArrayList<>();
         List<String> sampleValues = new ArrayList<>();
         int totalCells = 0;
         int emptyCells = 0;
 
-        // Analyze data in this column
-        for (int rowNum = 1; rowNum <= sheet.getLastRowNum() && sampleValues.size() < 5; rowNum++) {
+        System.out.println("\nAnalyzing column: " + columnName + " (index " + columnIndex + ")");
+        System.out.println("  Processing rows 1 to " + lastDataRow);
+
+        // Analyze only data rows (excluding summary rows)
+        for (int rowNum = 1; rowNum <= lastDataRow; rowNum++) {
             Row row = sheet.getRow(rowNum);
             if (row != null) {
                 Cell cell = row.getCell(columnIndex);
@@ -212,11 +320,34 @@ public class ExcelReaderUtility {
                 } else {
                     String cellValue = getCellValueAsString(cell);
                     if (!cellValue.isEmpty()) {
-                        sampleValues.add(cellValue);
+                        // Collect sample values
+                        if (sampleValues.size() < 5) {
+                            sampleValues.add(cellValue);
+                        }
 
                         // Try to parse as number for statistics
                         if (cell.getCellType() == CellType.NUMERIC) {
-                            numericValues.add(cell.getNumericCellValue());
+                            double numValue = cell.getNumericCellValue();
+
+                            // Skip date values (Excel dates are large numbers like 45000+)
+                            if (columnName.toLowerCase().contains("date") && numValue > 40000) {
+                                continue;
+                            }
+
+                            numericValues.add(numValue);
+                        } else {
+                            // Try to parse string as number for columns that should be numeric
+                            if (columnName.toLowerCase().contains("qty") ||
+                                    columnName.toLowerCase().contains("total") ||
+                                    columnName.toLowerCase().contains("price")) {
+                                try {
+                                    String cleanValue = cellValue.replace(",", "").replace("$", "").trim();
+                                    double numValue = Double.parseDouble(cleanValue);
+                                    numericValues.add(numValue);
+                                } catch (NumberFormatException e) {
+                                    // Not a number, skip
+                                }
+                            }
                         }
                     }
                 }
@@ -227,13 +358,18 @@ public class ExcelReaderUtility {
         info.setTotalCells(totalCells);
         info.setEmptyCells(emptyCells);
 
-        // Determine if column is numeric and calculate statistics
-        if (!numericValues.isEmpty() && numericValues.size() > totalCells * 0.8) { // 80% numeric threshold
+        // Calculate statistics from actual data
+        if (!numericValues.isEmpty()) {
             info.setNumeric(true);
             double sum = numericValues.stream().mapToDouble(Double::doubleValue).sum();
             double average = sum / numericValues.size();
             info.setSum(sum);
             info.setAverage(average);
+
+            System.out.println("  Column '" + columnName + "': " + numericValues.size() + " numeric values, sum = " + sum + ", avg = " + average);
+        } else {
+            info.setNumeric(false);
+            System.out.println("  Column '" + columnName + "': No numeric values found");
         }
 
         return info;

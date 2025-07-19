@@ -89,16 +89,19 @@ public class PurchaseRecord {
         this.totalCost = totalCost;
     }
 
-    //  method to convert to Object array for JTable
+    /**
+     * Method to convert to Object array for JTable.
+     * Order matches the GUI table headers: Product Name, Unit Price, Qty Sold, Sale Date, Category, Customer Name, Total Amount
+     */
     public Object[] toObjectArray() {
         return new Object[]{
-                itemName,
-                price,
-                quantity,
-                purchaseDate,
-                category,
-                vendor,
-                totalCost
+                itemName,           // Product Name
+                price,              // Unit Price
+                quantity,           // Qty Sold
+                purchaseDate,       // Sale Date
+                category,           // Category
+                vendor,             // Customer Name
+                totalCost           // Total Amount
         };
     }
 

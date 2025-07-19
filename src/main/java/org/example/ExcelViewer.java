@@ -84,7 +84,8 @@ public class ExcelViewer extends JFrame {
 
         loadFileButton = new JButton("Load Excel File");
         loadFileButton.setPreferredSize(new Dimension(150, 30));
-        loadFileButton.setIcon(new ImageIcon()); // You can add an icon here
+        // Remove the icon line that's causing the crash
+        // loadFileButton.setIcon(new ImageIcon());
 
         JLabel instructionLabel = new JLabel("Select an Excel file (.xlsx) to analyze:");
         instructionLabel.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 12));
@@ -124,8 +125,8 @@ public class ExcelViewer extends JFrame {
         tablePanel.setBorder(BorderFactory.createTitledBorder("Excel Data"));
 
         // Initialize table model and table
-        String[] columnNames = {"Item Name", "Price", "Quantity", "Purchase Date",
-                "Category", "Vendor", "Total Cost"};
+        String[] columnNames = {"Product Name", "Unit Price", "Qty Sold", "Sale Date",
+                "Category", "Customer Name", "Total Amount"};
         tableModel = new DefaultTableModel(columnNames, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
