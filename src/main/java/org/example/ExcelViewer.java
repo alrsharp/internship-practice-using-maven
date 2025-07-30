@@ -8,10 +8,12 @@ import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.io.File;
 import java.io.IOException;
+import java.math.BigDecimal;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 
 /**
- * GUI class for Excel file viewer and analyzer.
+ * Fixed GUI class for Excel file viewer and analyzer.
  * Handles all user interface interactions and display logic.
  */
 public class ExcelViewer extends JFrame {
@@ -43,7 +45,7 @@ public class ExcelViewer extends JFrame {
      */
     private void initializeGUI() {
         // Set up main window
-        setTitle("Excel File Analyzer");
+        setTitle("Sales Data Analyzer");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setSize(1200, 800);
         setLocationRelativeTo(null); // Center on screen
@@ -84,8 +86,6 @@ public class ExcelViewer extends JFrame {
 
         loadFileButton = new JButton("Load Excel File");
         loadFileButton.setPreferredSize(new Dimension(150, 30));
-        // Remove the icon line that's causing the crash
-        // loadFileButton.setIcon(new ImageIcon());
 
         JLabel instructionLabel = new JLabel("Select an Excel file (.xlsx) to analyze:");
         instructionLabel.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 12));
@@ -122,11 +122,10 @@ public class ExcelViewer extends JFrame {
      */
     private JPanel createTablePanel() {
         JPanel tablePanel = new JPanel(new BorderLayout());
-        tablePanel.setBorder(BorderFactory.createTitledBorder("Excel Data"));
+        tablePanel.setBorder(BorderFactory.createTitledBorder("Sales Data"));
 
-        // Initialize table model and table
-        String[] columnNames = {"Product Name", "Unit Price", "Qty Sold", "Sale Date",
-                "Category", "Customer Name", "Total Amount"};
+        // Initialize table model with cleaned up column names
+        String[] columnNames = {"Product Name", "Unit Price", "Qty Sold", "Sale Date", "Customer Name", "Total Amount"};
         tableModel = new DefaultTableModel(columnNames, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
@@ -157,7 +156,7 @@ public class ExcelViewer extends JFrame {
      */
     private JPanel createAnalysisPanel() {
         JPanel analysisPanel = new JPanel(new BorderLayout());
-        analysisPanel.setBorder(BorderFactory.createTitledBorder("Column Analysis & Statistics"));
+        analysisPanel.setBorder(BorderFactory.createTitledBorder("Data Analysis & Statistics"));
 
         analysisArea = new JTextArea();
         analysisArea.setEditable(false);
@@ -274,14 +273,25 @@ public class ExcelViewer extends JFrame {
 
     /**
      * Populates the JTable with data from PurchaseRecord list.
+     * Updated to properly format and display only relevant columns.
      */
     private void populateTable(List<PurchaseRecord> records) {
         // Clear existing data
         tableModel.setRowCount(0);
 
-        // Add new data
+        // DateTimeFormatter for better date formatting
+        DateTimeFormatter dateFormatter = DateTimeFormatter.ofPattern("MM/dd/yyyy");
+
+        // Add new data - only showing relevant columns without category
         for (PurchaseRecord record : records) {
-            Object[] rowData = record.toObjectArray();
+            Object[] rowData = {
+                    record.getItemName() != null ? record.getItemName() : "",                    // Product Name
+                    record.getPrice() != null ? String.format("$%.2f", record.getPrice()) : "$0.00",  // Unit Price formatted
+                    record.getQuantity(),                                                        // Qty Sold
+                    record.getPurchaseDate() != null ? record.getPurchaseDate().format(dateFormatter) : "", // Sale Date formatted
+                    record.getVendor() != null ? record.getVendor() : "",                       // Customer Name
+                    record.getTotalCost() != null ? String.format("$%.2f", record.getTotalCost()) : "$0.00" // Total Amount formatted
+            };
             tableModel.addRow(rowData);
         }
 
@@ -294,10 +304,15 @@ public class ExcelViewer extends JFrame {
      */
     private void displayAnalysis(ExcelReaderUtility.ExcelAnalysis analysis) {
         StringBuilder sb = new StringBuilder();
-        sb.append("EXCEL FILE ANALYSIS\n");
+        sb.append("SALES DATA ANALYSIS\n");
         sb.append("===================\n\n");
 
         List<ExcelReaderUtility.ColumnInfo> columns = analysis.getColumns();
+
+        sb.append("DATA OVERVIEW:\n");
+        sb.append("--------------\n");
+        sb.append(String.format("Records loaded: %d\n", currentRecords != null ? currentRecords.size() : 0));
+        sb.append(String.format("Columns found: %d\n\n", columns.size()));
 
         sb.append("COLUMN INFORMATION:\n");
         sb.append("-------------------\n");
@@ -324,28 +339,47 @@ public class ExcelViewer extends JFrame {
 
             // Show statistics for numeric columns
             if (column.isNumeric()) {
-                sb.append(String.format("   Sum: %.2f\n", column.getSum()));
-                sb.append(String.format("   Average: %.2f\n", column.getAverage()));
+                sb.append(String.format("   Sum: $%.2f\n", column.getSum()));
+                sb.append(String.format("   Average: $%.2f\n", column.getAverage()));
             }
 
             sb.append("\n");
         }
 
-        // Summary statistics
-        sb.append("SUMMARY STATISTICS:\n");
-        sb.append("-------------------\n");
-        long numericColumns = columns.stream().mapToLong(col -> col.isNumeric() ? 1 : 0).sum();
-        sb.append(String.format("Total columns: %d\n", columns.size()));
-        sb.append(String.format("Numeric columns: %d\n", numericColumns));
-        sb.append(String.format("Text columns: %d\n", columns.size() - numericColumns));
+        // Sales summary statistics
+        if (currentRecords != null && !currentRecords.isEmpty()) {
+            sb.append("SALES SUMMARY:\n");
+            sb.append("--------------\n");
 
-        // Display numeric column summaries
-        sb.append("\nNUMERIC COLUMN SUMMARIES:\n");
-        sb.append("-------------------------\n");
-        for (ExcelReaderUtility.ColumnInfo column : columns) {
-            if (column.isNumeric()) {
-                sb.append(String.format("Column '%s' sum is %.2f and average is %.2f\n",
-                        column.getName(), column.getSum(), column.getAverage()));
+            BigDecimal totalRevenue = currentRecords.stream()
+                    .filter(r -> r.getTotalCost() != null)
+                    .map(PurchaseRecord::getTotalCost)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+            int totalQuantity = currentRecords.stream()
+                    .mapToInt(PurchaseRecord::getQuantity)
+                    .sum();
+
+            long uniqueProducts = currentRecords.stream()
+                    .map(PurchaseRecord::getItemName)
+                    .filter(name -> name != null && !name.trim().isEmpty())
+                    .distinct()
+                    .count();
+
+            long uniqueCustomers = currentRecords.stream()
+                    .map(PurchaseRecord::getVendor)
+                    .filter(vendor -> vendor != null && !vendor.trim().isEmpty())
+                    .distinct()
+                    .count();
+
+            sb.append(String.format("Total Revenue: $%.2f\n", totalRevenue));
+            sb.append(String.format("Total Units Sold: %d\n", totalQuantity));
+            sb.append(String.format("Unique Products: %d\n", uniqueProducts));
+            sb.append(String.format("Unique Customers: %d\n", uniqueCustomers));
+
+            if (totalQuantity > 0) {
+                BigDecimal avgRevenuePerUnit = totalRevenue.divide(BigDecimal.valueOf(totalQuantity), 2, BigDecimal.ROUND_HALF_UP);
+                sb.append(String.format("Average Revenue per Unit: $%.2f\n", avgRevenuePerUnit));
             }
         }
 

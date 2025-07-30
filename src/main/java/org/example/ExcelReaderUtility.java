@@ -12,8 +12,9 @@ import java.time.ZoneId;
 import java.util.*;
 
 /**
- * Utility class for reading and analyzing Excel files.
+ * Fixed utility class for reading and analyzing Excel files.
  * Handles all Excel-related operations and data extraction.
+ * NOW SUPPORTS FORMULA EVALUATION!
  */
 public class ExcelReaderUtility {
 
@@ -29,6 +30,9 @@ public class ExcelReaderUtility {
 
         try (FileInputStream fis = new FileInputStream(filePath);
              XSSFWorkbook workbook = new XSSFWorkbook(fis)) {
+
+            // Create formula evaluator for handling formulas
+            FormulaEvaluator formulaEvaluator = workbook.getCreationHelper().createFormulaEvaluator();
 
             Sheet sheet = workbook.getSheetAt(0);
 
@@ -47,17 +51,22 @@ public class ExcelReaderUtility {
                 System.out.println("  '" + entry.getKey() + "' -> column " + entry.getValue());
             }
 
-            // Detect where the actual data ends (before summary rows)
+            // Find the first non-empty data row and last data row
+            int firstDataRow = findFirstDataRow(sheet);
             int lastDataRow = findLastDataRow(sheet);
-            System.out.println("Data rows: 1 to " + lastDataRow + " (total sheet rows: " + sheet.getLastRowNum() + ")");
 
-            // Read data rows (excluding summary rows)
-            for (int rowNum = 1; rowNum <= lastDataRow; rowNum++) {
+            System.out.println("Data rows: " + firstDataRow + " to " + lastDataRow + " (total sheet rows: " + sheet.getLastRowNum() + ")");
+
+            // Read data rows (excluding empty and summary rows)
+            for (int rowNum = firstDataRow; rowNum <= lastDataRow; rowNum++) {
                 Row dataRow = sheet.getRow(rowNum);
                 if (dataRow != null && !isRowEmpty(dataRow)) {
                     try {
-                        PurchaseRecord record = createPurchaseRecord(dataRow, columnMap);
-                        records.add(record);
+                        PurchaseRecord record = createPurchaseRecord(dataRow, columnMap, formulaEvaluator);
+                        // Only add records that have essential data
+                        if (record.getItemName() != null && !record.getItemName().trim().isEmpty()) {
+                            records.add(record);
+                        }
                     } catch (Exception e) {
                         System.err.println("Error processing row " + (rowNum + 1) + ": " + e.getMessage());
                         // Continue processing other rows
@@ -70,83 +79,61 @@ public class ExcelReaderUtility {
     }
 
     /**
+     * Finds the first row that contains actual data (not empty).
+     */
+    private static int findFirstDataRow(Sheet sheet) {
+        // Start from row 1 (after header) and find first non-empty row
+        for (int rowNum = 1; rowNum <= sheet.getLastRowNum(); rowNum++) {
+            Row row = sheet.getRow(rowNum);
+            if (row != null && !isRowEmpty(row)) {
+                // Check if this row has meaningful data (not just random values)
+                if (hasValidData(row)) {
+                    return rowNum;
+                }
+            }
+        }
+        return 1; // Default to row 1 if no data found
+    }
+
+    /**
+     * Checks if a row has valid purchase data.
+     */
+    private static boolean hasValidData(Row row) {
+        // A valid data row should have at least a date and some text/numeric data
+        Cell firstCell = row.getCell(0); // Assuming first column is date
+        if (firstCell != null && (DateUtil.isCellDateFormatted(firstCell) || firstCell.getCellType() == CellType.NUMERIC)) {
+            // Check if there's some text data in the row (product name, customer, etc.)
+            for (int i = 1; i < Math.min(8, row.getLastCellNum()); i++) {
+                Cell cell = row.getCell(i);
+                if (cell != null && cell.getCellType() == CellType.STRING) {
+                    String value = cell.getStringCellValue().trim();
+                    if (!value.isEmpty() && value.length() > 2) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
      * Finds the last row that contains actual data (not summary rows).
-     * Uses a simple but effective approach: exclude last 2 rows if they look like summaries.
      */
     private static int findLastDataRow(Sheet sheet) {
         int totalRows = sheet.getLastRowNum();
 
         System.out.println("Total rows in sheet: " + (totalRows + 1) + " (0-indexed: " + totalRows + ")");
 
-        // Simple approach: check if the last 2 rows look like summary rows
-        // If so, exclude them. If not, include all rows.
-        boolean lastRowsAreSummary = checkLastTwoRowsForSummary(sheet);
-
-        if (lastRowsAreSummary) {
-            int lastDataRow = totalRows - 2;
-            System.out.println("Last 2 rows detected as summary rows. Data ends at row " + (lastDataRow + 1));
-            return lastDataRow;
-        } else {
-            System.out.println("No summary rows detected. Processing all rows.");
-            return totalRows;
-        }
-    }
-
-    /**
-     * Specifically checks if the last two rows contain summary data.
-     */
-    private static boolean checkLastTwoRowsForSummary(Sheet sheet) {
-        int totalRows = sheet.getLastRowNum();
-
-        System.out.println("Checking rows " + (totalRows - 1) + " and " + totalRows + " for summary patterns");
-
-        // Check both of the last two rows (0-indexed: totalRows-1 and totalRows)
-        for (int rowNum = totalRows - 1; rowNum <= totalRows; rowNum++) {
+        // Look backwards from the end to find the last row with meaningful data
+        for (int rowNum = totalRows; rowNum >= 1; rowNum--) {
             Row row = sheet.getRow(rowNum);
-            if (row != null) {
-                System.out.println("Checking row " + (rowNum + 1) + " for summary pattern:");
-
-                int emptyCells = 0;
-                int totalCells = 0;
-                int numericCells = 0;
-                boolean hasLargeNumbers = false;
-
-                // Check up to 10 cells or the actual number of cells in the row
-                int cellsToCheck = Math.min(10, row.getLastCellNum());
-
-                for (int cellNum = 0; cellNum < cellsToCheck; cellNum++) {
-                    Cell cell = row.getCell(cellNum);
-                    totalCells++;
-
-                    if (cell == null || cell.getCellType() == CellType.BLANK) {
-                        emptyCells++;
-                    } else if (cell.getCellType() == CellType.NUMERIC) {
-                        numericCells++;
-                        double value = cell.getNumericCellValue();
-                        System.out.println("  Cell " + cellNum + ": " + value);
-
-                        // Look for numbers that could be totals (avoid dates which are 40000+)
-                        if (value >= 1000 && value <= 100000) {
-                            hasLargeNumbers = true;
-                        }
-                    } else if (cell.getCellType() == CellType.STRING) {
-                        System.out.println("  Cell " + cellNum + ": '" + cell.getStringCellValue().trim() + "'");
-                    }
-                }
-
-                System.out.println("  Empty: " + emptyCells + "/" + totalCells + ", Numeric: " + numericCells + ", Has large numbers: " + hasLargeNumbers);
-
-                // If this row is mostly empty (60%+) and has large numbers, it's likely a summary
-                double emptyPercentage = totalCells > 0 ? (double) emptyCells / totalCells : 0;
-                if (emptyPercentage >= 0.6 && hasLargeNumbers) {
-                    System.out.println("  -> Row " + (rowNum + 1) + " looks like a summary row");
-                    return true;
-                }
+            if (row != null && !isRowEmpty(row) && hasValidData(row)) {
+                System.out.println("Last data row found at: " + (rowNum + 1));
+                return rowNum;
             }
         }
 
-        System.out.println("No summary rows detected in last 2 rows");
-        return false;
+        return totalRows; // Default to all rows if unsure
     }
 
     /**
@@ -169,33 +156,35 @@ public class ExcelReaderUtility {
 
     /**
      * Creates a PurchaseRecord from a data row using the column map.
-     * Updated to match the actual Excel column names.
+     * Updated to match the actual Excel column names from the file.
+     * NOW INCLUDES FORMULA EVALUATOR!
      */
-    private static PurchaseRecord createPurchaseRecord(Row dataRow, Map<String, Integer> columnMap) {
+    private static PurchaseRecord createPurchaseRecord(Row dataRow, Map<String, Integer> columnMap, FormulaEvaluator formulaEvaluator) {
         PurchaseRecord record = new PurchaseRecord();
 
-        // Extract data based on actual Excel column names
-        record.setItemName(getStringValue(dataRow, columnMap, "procuct name", "product name", "item", "itemname", "name"));
-        record.setPrice(getBigDecimalValue(dataRow, columnMap, "unit price", "price", "cost", "unitprice"));
-        record.setQuantity(getIntValue(dataRow, columnMap, "qty sold", "quantity sold", "quantity", "qty", "amount"));
-        record.setPurchaseDate(getDateValue(dataRow, columnMap, "sale date", "date", "purchasedate", "orderdate"));
-        record.setCategory(getStringValue(dataRow, columnMap, "category", "type", "group"));
-        record.setVendor(getStringValue(dataRow, columnMap, "customer name", "vendor", "supplier", "store", "customer"));
-        record.setTotalCost(getBigDecimalValue(dataRow, columnMap, "total amount", "total", "totalcost", "totalprice"));
+        // Extract data based on actual Excel column names (case-insensitive)
+        record.setItemName(getStringValue(dataRow, columnMap, formulaEvaluator, "procuct name", "product name", "item", "itemname", "name"));
+        record.setPrice(getBigDecimalValue(dataRow, columnMap, formulaEvaluator, "unit price", "price", "cost", "unitprice"));
+        record.setQuantity(getIntValue(dataRow, columnMap, formulaEvaluator, "qty sold", "quantity sold", "quantity", "qty", "amount"));
+        record.setPurchaseDate(getDateValue(dataRow, columnMap, formulaEvaluator, "sale date", "date", "purchasedate", "orderdate"));
+        record.setCategory(getStringValue(dataRow, columnMap, formulaEvaluator, "category", "type", "group", "sku")); // Include SKU as category for now
+        record.setVendor(getStringValue(dataRow, columnMap, formulaEvaluator, "customer name", "vendor", "supplier", "store", "customer"));
+        record.setTotalCost(getBigDecimalValue(dataRow, columnMap, formulaEvaluator, "total amount", "total", "totalcost", "totalprice"));
 
         return record;
     }
 
     /**
      * Gets string value from row using multiple possible column names.
+     * NOW SUPPORTS FORMULAS!
      */
-    private static String getStringValue(Row row, Map<String, Integer> columnMap, String... possibleNames) {
+    private static String getStringValue(Row row, Map<String, Integer> columnMap, FormulaEvaluator formulaEvaluator, String... possibleNames) {
         for (String name : possibleNames) {
             Integer columnIndex = columnMap.get(name);
             if (columnIndex != null) {
                 Cell cell = row.getCell(columnIndex);
                 if (cell != null) {
-                    String value = getCellValueAsString(cell);
+                    String value = getCellValueAsString(cell, formulaEvaluator);
                     if (!value.isEmpty()) {
                         return value;
                     }
@@ -207,14 +196,22 @@ public class ExcelReaderUtility {
 
     /**
      * Gets BigDecimal value from row using multiple possible column names.
+     * FIXED TO HANDLE FORMULAS!
      */
-    private static BigDecimal getBigDecimalValue(Row row, Map<String, Integer> columnMap, String... possibleNames) {
+    private static BigDecimal getBigDecimalValue(Row row, Map<String, Integer> columnMap, FormulaEvaluator formulaEvaluator, String... possibleNames) {
         for (String name : possibleNames) {
             Integer columnIndex = columnMap.get(name);
             if (columnIndex != null) {
                 Cell cell = row.getCell(columnIndex);
-                if (cell != null && cell.getCellType() == CellType.NUMERIC) {
-                    return BigDecimal.valueOf(cell.getNumericCellValue());
+                if (cell != null) {
+                    try {
+                        double numericValue = getNumericCellValue(cell, formulaEvaluator);
+                        if (!Double.isNaN(numericValue)) {
+                            return BigDecimal.valueOf(numericValue);
+                        }
+                    } catch (Exception e) {
+                        System.err.println("Error getting numeric value from cell: " + e.getMessage());
+                    }
                 }
             }
         }
@@ -223,14 +220,22 @@ public class ExcelReaderUtility {
 
     /**
      * Gets integer value from row using multiple possible column names.
+     * FIXED TO HANDLE FORMULAS!
      */
-    private static int getIntValue(Row row, Map<String, Integer> columnMap, String... possibleNames) {
+    private static int getIntValue(Row row, Map<String, Integer> columnMap, FormulaEvaluator formulaEvaluator, String... possibleNames) {
         for (String name : possibleNames) {
             Integer columnIndex = columnMap.get(name);
             if (columnIndex != null) {
                 Cell cell = row.getCell(columnIndex);
-                if (cell != null && cell.getCellType() == CellType.NUMERIC) {
-                    return (int) cell.getNumericCellValue();
+                if (cell != null) {
+                    try {
+                        double numericValue = getNumericCellValue(cell, formulaEvaluator);
+                        if (!Double.isNaN(numericValue)) {
+                            return (int) numericValue;
+                        }
+                    } catch (Exception e) {
+                        System.err.println("Error getting integer value from cell: " + e.getMessage());
+                    }
                 }
             }
         }
@@ -240,7 +245,7 @@ public class ExcelReaderUtility {
     /**
      * Gets LocalDate value from row using multiple possible column names.
      */
-    private static LocalDate getDateValue(Row row, Map<String, Integer> columnMap, String... possibleNames) {
+    private static LocalDate getDateValue(Row row, Map<String, Integer> columnMap, FormulaEvaluator formulaEvaluator, String... possibleNames) {
         for (String name : possibleNames) {
             Integer columnIndex = columnMap.get(name);
             if (columnIndex != null) {
@@ -262,13 +267,57 @@ public class ExcelReaderUtility {
     }
 
     /**
+     * NEW METHOD: Gets numeric value from cell, handling both direct values and formulas.
+     */
+    private static double getNumericCellValue(Cell cell, FormulaEvaluator formulaEvaluator) {
+        if (cell == null) {
+            return Double.NaN;
+        }
+
+        switch (cell.getCellType()) {
+            case NUMERIC:
+                return cell.getNumericCellValue();
+            case FORMULA:
+                try {
+                    // Evaluate the formula and get the result
+                    CellValue cellValue = formulaEvaluator.evaluate(cell);
+                    if (cellValue.getCellType() == CellType.NUMERIC) {
+                        return cellValue.getNumberValue();
+                    }
+                } catch (Exception e) {
+                    System.err.println("Error evaluating formula in cell: " + e.getMessage());
+                    // Try to get cached value if evaluation fails
+                    try {
+                        return cell.getNumericCellValue();
+                    } catch (Exception e2) {
+                        System.err.println("Error getting cached value: " + e2.getMessage());
+                    }
+                }
+                break;
+            case STRING:
+                // Try to parse string as number
+                try {
+                    return Double.parseDouble(cell.getStringCellValue().trim());
+                } catch (NumberFormatException e) {
+                    // Not a number
+                }
+                break;
+        }
+        return Double.NaN;
+    }
+
+    /**
      * Analyzes Excel file structure and provides column information.
+     * UPDATED TO SUPPORT FORMULAS!
      */
     public static ExcelAnalysis analyzeExcelFile(String filePath) throws IOException {
         ExcelAnalysis analysis = new ExcelAnalysis();
 
         try (FileInputStream fis = new FileInputStream(filePath);
              XSSFWorkbook workbook = new XSSFWorkbook(fis)) {
+
+            // Create formula evaluator
+            FormulaEvaluator formulaEvaluator = workbook.getCreationHelper().createFormulaEvaluator();
 
             Sheet sheet = workbook.getSheetAt(0);
             Row headerRow = sheet.getRow(0);
@@ -277,7 +326,8 @@ public class ExcelReaderUtility {
                 throw new IOException("No header row found");
             }
 
-            // Find last data row (exclude summary rows)
+            // Find actual data range
+            int firstDataRow = findFirstDataRow(sheet);
             int lastDataRow = findLastDataRow(sheet);
 
             // Analyze each column
@@ -285,7 +335,7 @@ public class ExcelReaderUtility {
                 Cell headerCell = headerRow.getCell(colNum);
                 if (headerCell != null) {
                     String columnName = headerCell.getStringCellValue();
-                    ColumnInfo columnInfo = analyzeColumn(sheet, colNum, columnName, lastDataRow);
+                    ColumnInfo columnInfo = analyzeColumn(sheet, colNum, columnName, firstDataRow, lastDataRow, formulaEvaluator);
                     analysis.addColumn(columnInfo);
                 }
             }
@@ -296,9 +346,9 @@ public class ExcelReaderUtility {
 
     /**
      * Analyzes a specific column to determine its data type and calculate statistics.
-     * Only analyzes actual data rows, excluding summary rows.
+     * UPDATED TO SUPPORT FORMULAS!
      */
-    private static ColumnInfo analyzeColumn(Sheet sheet, int columnIndex, String columnName, int lastDataRow) {
+    private static ColumnInfo analyzeColumn(Sheet sheet, int columnIndex, String columnName, int firstDataRow, int lastDataRow, FormulaEvaluator formulaEvaluator) {
         ColumnInfo info = new ColumnInfo(columnName);
         List<Double> numericValues = new ArrayList<>();
         List<String> sampleValues = new ArrayList<>();
@@ -306,10 +356,10 @@ public class ExcelReaderUtility {
         int emptyCells = 0;
 
         System.out.println("\nAnalyzing column: " + columnName + " (index " + columnIndex + ")");
-        System.out.println("  Processing rows 1 to " + lastDataRow);
+        System.out.println("  Processing rows " + firstDataRow + " to " + lastDataRow);
 
-        // Analyze only data rows (excluding summary rows)
-        for (int rowNum = 1; rowNum <= lastDataRow; rowNum++) {
+        // Analyze only actual data rows
+        for (int rowNum = firstDataRow; rowNum <= lastDataRow; rowNum++) {
             Row row = sheet.getRow(rowNum);
             if (row != null) {
                 Cell cell = row.getCell(columnIndex);
@@ -318,35 +368,19 @@ public class ExcelReaderUtility {
                 if (cell == null || cell.getCellType() == CellType.BLANK) {
                     emptyCells++;
                 } else {
-                    String cellValue = getCellValueAsString(cell);
+                    String cellValue = getCellValueAsString(cell, formulaEvaluator);
                     if (!cellValue.isEmpty()) {
                         // Collect sample values
                         if (sampleValues.size() < 5) {
                             sampleValues.add(cellValue);
                         }
 
-                        // Try to parse as number for statistics
-                        if (cell.getCellType() == CellType.NUMERIC) {
-                            double numValue = cell.getNumericCellValue();
-
+                        // Try to get numeric value for statistics
+                        double numValue = getNumericCellValue(cell, formulaEvaluator);
+                        if (!Double.isNaN(numValue)) {
                             // Skip date values (Excel dates are large numbers like 45000+)
-                            if (columnName.toLowerCase().contains("date") && numValue > 40000) {
-                                continue;
-                            }
-
-                            numericValues.add(numValue);
-                        } else {
-                            // Try to parse string as number for columns that should be numeric
-                            if (columnName.toLowerCase().contains("qty") ||
-                                    columnName.toLowerCase().contains("total") ||
-                                    columnName.toLowerCase().contains("price")) {
-                                try {
-                                    String cleanValue = cellValue.replace(",", "").replace("$", "").trim();
-                                    double numValue = Double.parseDouble(cleanValue);
-                                    numericValues.add(numValue);
-                                } catch (NumberFormatException e) {
-                                    // Not a number, skip
-                                }
+                            if (!columnName.toLowerCase().contains("date") || numValue <= 40000) {
+                                numericValues.add(numValue);
                             }
                         }
                     }
@@ -377,6 +411,56 @@ public class ExcelReaderUtility {
 
     /**
      * Extracts cell value as string, handling different cell types.
+     * UPDATED TO SUPPORT FORMULAS!
+     */
+    private static String getCellValueAsString(Cell cell, FormulaEvaluator formulaEvaluator) {
+        if (cell == null) return "";
+
+        switch (cell.getCellType()) {
+            case STRING:
+                return cell.getStringCellValue().trim();
+            case NUMERIC:
+                if (DateUtil.isCellDateFormatted(cell)) {
+                    return cell.getDateCellValue().toString();
+                } else {
+                    double numValue = cell.getNumericCellValue();
+                    if (numValue == Math.floor(numValue)) {
+                        return String.valueOf((long) numValue);
+                    } else {
+                        return String.valueOf(numValue);
+                    }
+                }
+            case BOOLEAN:
+                return String.valueOf(cell.getBooleanCellValue());
+            case FORMULA:
+                try {
+                    CellValue cellValue = formulaEvaluator.evaluate(cell);
+                    switch (cellValue.getCellType()) {
+                        case NUMERIC:
+                            double numValue = cellValue.getNumberValue();
+                            if (numValue == Math.floor(numValue)) {
+                                return String.valueOf((long) numValue);
+                            } else {
+                                return String.valueOf(numValue);
+                            }
+                        case STRING:
+                            return cellValue.getStringValue();
+                        case BOOLEAN:
+                            return String.valueOf(cellValue.getBooleanValue());
+                        default:
+                            return "";
+                    }
+                } catch (Exception e) {
+                    System.err.println("Error evaluating formula: " + e.getMessage());
+                    return "Formula Error";
+                }
+            default:
+                return "";
+        }
+    }
+
+    /**
+     * OVERLOADED METHOD: Extracts cell value as string without formula evaluator (for backward compatibility).
      */
     private static String getCellValueAsString(Cell cell) {
         if (cell == null) return "";
@@ -414,6 +498,8 @@ public class ExcelReaderUtility {
      * Checks if a row is completely empty.
      */
     private static boolean isRowEmpty(Row row) {
+        if (row == null) return true;
+
         for (int cellNum = row.getFirstCellNum(); cellNum < row.getLastCellNum(); cellNum++) {
             Cell cell = row.getCell(cellNum);
             if (cell != null && cell.getCellType() != CellType.BLANK) {
